@@ -1,0 +1,5 @@
+{
+  "name": "AI Web VT Automation MVP",
+  "description": "An AI-powered web automation platform for testing Coze.cn using Playwright and Gemini.",
+  "requestFramePermissions": []
+}

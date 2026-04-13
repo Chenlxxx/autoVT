@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ai-web-vt-automation
+    env: node
+    buildCommand: npm install && npm run build && npx playwright install chromium --with-deps
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: APP_URL
+        fromContext: true
