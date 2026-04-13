@@ -4,7 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs-extra";
 import { v4 as uuidv4 } from "uuid";
-import { runCozeTest } from "./automation/coze-test.ts";
+import { runTestFlow } from "./automation/executor.ts";
+import { cozeCreateAgentFlow } from "./automation/flows/coze-create-agent.ts";
 import { analyzeResult } from "./server/gemini.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -37,11 +38,11 @@ async function startServer() {
     const taskDir = path.join(storageDir, taskId);
     await fs.ensureDir(taskDir);
 
-    // Run test in background
-    runCozeTest(taskId, targetUrl, taskDir)
+    // Run test in background using the new generic executor
+    runTestFlow(taskId, cozeCreateAgentFlow, taskDir, targetUrl)
       .then(async (result) => {
-        // Analyze with Gemini
-        const aiSummary = await analyzeResult(result, taskDir);
+        // Analyze with AI
+        const aiSummary = await analyzeResult(result as any, taskDir);
         result.aiSummary = aiSummary;
         
         // Save final result

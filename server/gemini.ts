@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { TestResult } from "../automation/coze-test.ts";
+import { TestResult } from "../automation/types.ts";
 
 // 配置自定义 AI 模型 (Anthropic 格式)
 const anthropic = new Anthropic({

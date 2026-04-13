@@ -127,6 +127,8 @@ export default function App() {
                       <CheckCircle className="w-5 h-5 text-emerald-500" />
                     ) : task.status === "failure" ? (
                       <XCircle className="w-5 h-5 text-rose-500" />
+                    ) : task.status === "AUTH_REQUIRED" || task.status === "AUTH_EXPIRED" ? (
+                      <AlertCircle className="w-5 h-5 text-amber-500" />
                     ) : (
                       <Clock className="w-5 h-5 text-amber-500 animate-spin" />
                     )}
@@ -174,12 +176,33 @@ export default function App() {
                       <h2 className="text-2xl font-bold tracking-tight">任务详情报告</h2>
                       <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest ${
                         selectedTask.status === "success" ? "bg-emerald-100 text-emerald-700" : 
-                        selectedTask.status === "failure" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"
+                        selectedTask.status === "failure" ? "bg-rose-100 text-rose-700" : 
+                        selectedTask.status === "AUTH_REQUIRED" || selectedTask.status === "AUTH_EXPIRED" ? "bg-amber-100 text-amber-700" :
+                        "bg-amber-100 text-amber-700"
                       }`}>
-                        {selectedTask.status === "success" ? "成功" : selectedTask.status === "failure" ? "失败" : "运行中"}
+                        {selectedTask.status === "success" ? "成功" : 
+                         selectedTask.status === "failure" ? "失败" : 
+                         selectedTask.status === "AUTH_REQUIRED" ? "需要登录" :
+                         selectedTask.status === "AUTH_EXPIRED" ? "登录过期" :
+                         "运行中"}
                       </span>
                     </div>
                   </div>
+
+                  {(selectedTask.status === "AUTH_REQUIRED" || selectedTask.status === "AUTH_EXPIRED") && (
+                    <div className="mx-8 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-amber-800">
+                          {selectedTask.status === "AUTH_REQUIRED" ? "未检测到登录态" : "登录态已过期"}
+                        </div>
+                        <div className="text-sm text-amber-700 mt-1">
+                          {selectedTask.message || "请在本地终端运行 npm run save-auth 进行人工登录并保存登录态。"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-3 gap-6 text-sm">
                     <div>
                       <div className="text-slate-400 mb-1">开始时间</div>
