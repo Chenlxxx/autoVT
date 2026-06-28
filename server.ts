@@ -20,6 +20,22 @@ const authDir = path.join(rootDir, "playwright", ".auth");
 const distDir = path.join(rootDir, "dist");
 
 type JsonValue = Record<string, any> | any[];
+type AuthSessionStatus = "running" | "success" | "failure";
+
+interface AuthSession {
+  id: string;
+  status: AuthSessionStatus;
+  startedAt: string;
+  completedAt?: string;
+  message: string;
+  authPath?: string;
+}
+
+const authSessions = new Map<string, AuthSession>();
+
+function interactiveAuthSupported() {
+  return !process.env.RENDER && !process.env.RENDER_SERVICE_ID;
+}
 
 async function pathExists(filePath: string) {
   try {
@@ -99,6 +115,47 @@ async function listTasks() {
   return tasks.sort((a, b) => new Date(b.startTime || 0).getTime() - new Date(a.startTime || 0).getTime());
 }
 
+async function runInteractiveAuth(sessionId: string, targetUrl: string, authPath: string) {
+  const session = authSessions.get(sessionId);
+  if (!session) return;
+
+  try {
+    const { chromium } = await import("playwright");
+    await fs.mkdir(path.dirname(authPath), { recursive: true });
+
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+      await page.goto(targetUrl || "https://www.coze.cn/", { waitUntil: "domcontentloaded", timeout: 60000 });
+      session.message = "浏览器已打开。请完成登录，AutoVT 会在检测到登录成功后自动保存。";
+
+      await page.waitForFunction(
+        () => {
+          const url = window.location.href;
+          const text = document.body.innerText;
+          const notLoginPage = !/passport|auth\/login|login/i.test(url);
+          const hasWorkspaceSignal = /资源|项目|空间|工作流|个人空间|Library|Workflow/i.test(text);
+          return notLoginPage && hasWorkspaceSignal;
+        },
+        { timeout: 300000 }
+      );
+
+      await context.storageState({ path: authPath });
+      session.status = "success";
+      session.completedAt = new Date().toISOString();
+      session.message = `登录态已保存：${path.relative(rootDir, authPath)}。现在可以直接运行 Coze 案例。`;
+    } finally {
+      await browser.close();
+    }
+  } catch (error: any) {
+    session.status = "failure";
+    session.completedAt = new Date().toISOString();
+    session.message = error?.message || String(error);
+  }
+}
+
 function contentType(filePath: string) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".html") return "text/html; charset=utf-8";
@@ -131,6 +188,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       status: "ok",
       env: process.env.NODE_ENV || "development",
       cozeAuthReady: await pathExists(path.join(authDir, "coze-user.json")),
+      interactiveAuthSupported: interactiveAuthSupported(),
     });
   }
 
@@ -170,6 +228,43 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     const file = path.join(authDir, safeName);
     await writeJson(file, storageState);
     return sendJson(res, 200, { ok: true, path: path.relative(rootDir, file) });
+  }
+
+  if (method === "POST" && pathname === "/api/auth/interactive/start") {
+    if (!interactiveAuthSupported()) {
+      return sendJson(res, 400, {
+        error: "当前运行在云端环境，不能把服务器浏览器窗口弹到你的电脑上。请在本地运行 AutoVT 后使用一键登录，或继续粘贴 storageState。",
+      });
+    }
+
+    const { targetUrl = "https://www.coze.cn/", name = "coze-user.json" } = await readBody(req);
+    const sessionId = randomUUID();
+    const safeName = String(name).replace(/[^a-z0-9_.-]/gi, "") || "coze-user.json";
+    const authPath = path.join(authDir, safeName);
+    const session: AuthSession = {
+      id: sessionId,
+      status: "running",
+      startedAt: new Date().toISOString(),
+      message: "正在打开登录浏览器，请在弹出的窗口中完成 Coze 登录。",
+      authPath: path.relative(rootDir, authPath),
+    };
+    authSessions.set(sessionId, session);
+
+    runInteractiveAuth(sessionId, String(targetUrl), authPath).catch((error) => {
+      const current = authSessions.get(sessionId);
+      if (!current) return;
+      current.status = "failure";
+      current.completedAt = new Date().toISOString();
+      current.message = error.message || String(error);
+    });
+
+    return sendJson(res, 200, session);
+  }
+
+  const authSessionMatch = pathname.match(/^\/api\/auth\/interactive\/([^/]+)$/);
+  if (method === "GET" && authSessionMatch) {
+    const session = authSessions.get(authSessionMatch[1]);
+    return session ? sendJson(res, 200, session) : sendJson(res, 404, { error: "Auth session not found" });
   }
 
   if (method === "POST" && pathname === "/api/test/run") {

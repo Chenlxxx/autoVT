@@ -75,6 +75,16 @@ interface TestResult {
 interface HealthState {
   status: string;
   cozeAuthReady: boolean;
+  interactiveAuthSupported: boolean;
+}
+
+interface AuthSession {
+  id: string;
+  status: "running" | "success" | "failure";
+  startedAt: string;
+  completedAt?: string;
+  message: string;
+  authPath?: string;
 }
 
 const defaultUrl = "https://www.coze.cn/space/7543460160883884075/library?force_stay=1";
@@ -112,6 +122,8 @@ export default function App() {
   const [tutorial, setTutorial] = useState(defaultTutorial);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isStartingAuth, setIsStartingAuth] = useState(false);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [authJson, setAuthJson] = useState("");
   const [zoomImage, setZoomImage] = useState<string | null>(null);
 
@@ -192,6 +204,42 @@ export default function App() {
     await refresh();
   }
 
+  async function startInteractiveAuth() {
+    setIsStartingAuth(true);
+    try {
+      const session = await fetchJson<AuthSession>("/api/auth/interactive/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUrl, name: "coze-user.json" }),
+      });
+      setAuthSession(session);
+
+      const poll = window.setInterval(async () => {
+        try {
+          const next = await fetchJson<AuthSession>(`/api/auth/interactive/${session.id}`);
+          setAuthSession(next);
+          if (next.status !== "running") {
+            window.clearInterval(poll);
+            await refresh();
+          }
+        } catch (error) {
+          window.clearInterval(poll);
+          console.error(error);
+        }
+      }, 2000);
+    } catch (error: any) {
+      setAuthSession({
+        id: "local-error",
+        status: "failure",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        message: error.message,
+      });
+    } finally {
+      setIsStartingAuth(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
@@ -239,7 +287,18 @@ export default function App() {
               <KeyRound className="h-4 w-4 text-amber-600" />
               <h2 className="font-semibold">登录态</h2>
             </div>
-            <p className="mb-3 text-sm leading-6 text-zinc-600">Coze 有验证码和账号安全校验，云端不能凭空登录。先本地运行登录保存，或把 storageState JSON 粘贴到这里。</p>
+            <p className="mb-3 text-sm leading-6 text-zinc-600">本地运行 AutoVT 时，可以直接弹出浏览器登录并自动保存。Render 云端无法把服务器浏览器窗口弹到你的电脑上，因此保留粘贴 JSON 作为备用。</p>
+            <button onClick={startInteractiveAuth} disabled={isStartingAuth || health?.interactiveAuthSupported === false} className="mb-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-amber-600 px-3 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-zinc-300">
+              {isStartingAuth || authSession?.status === "running" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} 打开登录窗口并自动保存
+            </button>
+            {health?.interactiveAuthSupported === false && (
+              <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">当前是云端环境，不支持弹出可见浏览器。请本地运行 AutoVT 使用一键登录，或粘贴 storageState。</div>
+            )}
+            {authSession && (
+              <div className={`mb-3 rounded-md border p-3 text-xs leading-5 ${authSession.status === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : authSession.status === "failure" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-blue-200 bg-blue-50 text-blue-800"}`}>
+                {authSession.message}
+              </div>
+            )}
             <textarea value={authJson} onChange={(event) => setAuthJson(event.target.value)} placeholder="粘贴 playwright storageState JSON" rows={4} className="mb-3 w-full resize-none rounded-md border border-zinc-300 px-3 py-2 text-xs font-mono outline-none focus:border-amber-500" />
             <button onClick={uploadAuth} disabled={!authJson.trim()} className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Save className="h-4 w-4" /> 保存登录态

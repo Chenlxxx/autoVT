@@ -22,13 +22,17 @@ Open `http://localhost:3000`.
 
 ## Coze Login State
 
-Coze normally requires manual login and may show verification challenges. Save a Playwright storage state before running the Coze template:
+Coze normally requires manual login and may show verification challenges.
+
+When AutoVT runs locally, use the Login panel in the web UI and click "打开登录窗口并自动保存". AutoVT will open a visible Playwright browser, wait for you to finish Coze login, then save `playwright/.auth/coze-user.json` automatically.
+
+You can also save the state from the command line:
 
 ```bash
 npm run save-auth
 ```
 
-This writes `playwright/.auth/coze-user.json`. The web UI also supports pasting a storageState JSON.
+Render and other cloud hosts cannot display a server-side browser window on your local computer. In that case, save login state locally and paste the storageState JSON in the UI, or provide it through your deployment secret workflow.
 
 ## Environment Variables
 
