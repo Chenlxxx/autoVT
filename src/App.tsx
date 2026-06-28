@@ -1,378 +1,424 @@
-import React, { useState, useEffect } from "react";
-import { Play, List, CheckCircle, XCircle, Clock, Image as ImageIcon, AlertCircle, ChevronRight, ExternalLink, Activity } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+﻿import React, { useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Bot,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  FileText,
+  Image as ImageIcon,
+  KeyRound,
+  Loader2,
+  Play,
+  Plus,
+  RefreshCw,
+  Save,
+  XCircle,
+} from "lucide-react";
+import { motion } from "motion/react";
 
-interface TestStep {
+type LoginMode = "none" | "storageState";
+type StepStatus = "pass" | "fail" | "skipped";
+type TaskStatus = "success" | "failure" | "running" | "auth_required" | "auth_expired";
+
+interface StepConfig {
+  id: string;
   name: string;
-  status: "pass" | "fail";
+  type: string;
+  description?: string;
+  value?: string;
+  timeout?: number;
+  screenshot?: boolean;
+}
+
+interface TestCase {
+  id: string;
+  name: string;
+  description: string;
+  targetUrl: string;
+  loginMode: LoginMode;
+  authStatePath?: string;
+  tags: string[];
+  tutorial?: string;
+  objective?: string;
+  steps: StepConfig[];
+  updatedAt: string;
+}
+
+interface TestStepResult {
+  id: string;
+  name: string;
+  type: string;
+  status: StepStatus;
   duration: number;
   error?: string;
+  evidence?: { screenshot?: string; extractedText?: string };
 }
 
 interface TestResult {
   taskId: string;
+  caseId: string;
+  caseName: string;
   startTime: string;
   endTime?: string;
   targetUrl: string;
-  status: "success" | "failure" | "running";
-  steps: TestStep[];
+  status: TaskStatus;
+  message?: string;
+  steps: TestStepResult[];
   screenshots: string[];
   consoleErrors: string[];
   networkFailures: string[];
-  finalOutput?: string;
   aiSummary?: string;
+  traceFile?: string;
+}
+
+interface HealthState {
+  status: string;
+  cozeAuthReady: boolean;
+}
+
+const defaultUrl = "https://www.coze.cn/space/7543460160883884075/library?force_stay=1";
+const defaultObjective = "进入资源页面，创建一个工作流，添加大模型节点，填写 prompt，试运行并确认有输出。";
+const defaultTutorial = "打开 Coze 资源/Library 页面，通过创建入口新建工作流，在画布中添加大模型节点，填写测试提示词，点击试运行，检查运行结果区域是否出现输出。";
+
+function statusMeta(status: TaskStatus) {
+  switch (status) {
+    case "success":
+      return { label: "通过", tone: "text-emerald-700 bg-emerald-50 border-emerald-200", icon: CheckCircle2 };
+    case "failure":
+      return { label: "失败", tone: "text-rose-700 bg-rose-50 border-rose-200", icon: XCircle };
+    case "auth_required":
+      return { label: "需要登录态", tone: "text-amber-700 bg-amber-50 border-amber-200", icon: KeyRound };
+    case "auth_expired":
+      return { label: "登录过期", tone: "text-amber-700 bg-amber-50 border-amber-200", icon: KeyRound };
+    default:
+      return { label: "运行中", tone: "text-blue-700 bg-blue-50 border-blue-200", icon: Loader2 };
+  }
+}
+
+function compactTime(value?: string) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
 }
 
 export default function App() {
-  const [targetUrl, setTargetUrl] = useState("https://www.coze.cn/space/7543460160883884075/develop");
+  const [health, setHealth] = useState<HealthState | null>(null);
+  const [cases, setCases] = useState<TestCase[]>([]);
   const [tasks, setTasks] = useState<TestResult[]>([]);
-  const [selectedTask, setSelectedTask] = useState<TestResult | null>(null);
+  const [selectedCaseId, setSelectedCaseId] = useState<string>("");
+  const [selectedTaskId, setSelectedTaskId] = useState<string>("");
+  const [targetUrl, setTargetUrl] = useState(defaultUrl);
+  const [objective, setObjective] = useState(defaultObjective);
+  const [tutorial, setTutorial] = useState(defaultTutorial);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [authJson, setAuthJson] = useState("");
   const [zoomImage, setZoomImage] = useState<string | null>(null);
 
-  const fetchTasks = async () => {
-    try {
-      const res = await fetch("/api/tasks");
-      const data = await res.json();
-      setTasks(data);
-    } catch (err) {
-      console.error("Failed to fetch tasks", err);
-    }
-  };
+  const selectedCase = useMemo(
+    () => cases.find((item) => item.id === selectedCaseId) || cases[0],
+    [cases, selectedCaseId]
+  );
+  const selectedTask = useMemo(
+    () => tasks.find((item) => item.taskId === selectedTaskId) || tasks[0],
+    [tasks, selectedTaskId]
+  );
+
+  async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(url, init);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  async function refresh() {
+    const [healthData, caseData, taskData] = await Promise.all([
+      fetchJson<HealthState>("/api/health"),
+      fetchJson<TestCase[]>("/api/cases"),
+      fetchJson<TestResult[]>("/api/tasks"),
+    ]);
+    setHealth(healthData);
+    setCases(caseData);
+    setTasks(taskData);
+    if (!selectedCaseId && caseData[0]) setSelectedCaseId(caseData[0].id);
+    if (!selectedTaskId && taskData[0]) setSelectedTaskId(taskData[0].taskId);
+  }
 
   useEffect(() => {
-    fetchTasks();
-    const interval = setInterval(fetchTasks, 5000);
-    return () => clearInterval(interval);
+    refresh().catch(console.error);
+    const timer = window.setInterval(() => refresh().catch(console.error), 4000);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const runTest = async () => {
-    setIsRunning(true);
+  async function generateCase() {
+    setIsGenerating(true);
     try {
-      const res = await fetch("/api/test/run", {
+      const generated = await fetchJson<TestCase>("/api/cases/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUrl }),
+        body: JSON.stringify({ targetUrl, objective, tutorial, loginMode: "storageState" }),
       });
-      const data = await res.json();
-      console.log("Test started", data);
-      fetchTasks();
-    } catch (err) {
-      console.error("Failed to run test", err);
+      await refresh();
+      setSelectedCaseId(generated.id);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function runCase(caseId?: string) {
+    const id = caseId || selectedCase?.id;
+    if (!id) return;
+    setIsRunning(true);
+    try {
+      const result = await fetchJson<{ taskId: string }>("/api/test/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId: id, targetUrl }),
+      });
+      setSelectedTaskId(result.taskId);
+      await refresh();
     } finally {
       setIsRunning(false);
     }
-  };
+  }
+
+  async function uploadAuth() {
+    const storageState = JSON.parse(authJson);
+    await fetchJson("/api/auth/storage-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "coze-user.json", storageState }),
+    });
+    setAuthJson("");
+    await refresh();
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 p-2 rounded-lg">
-            <Activity className="text-white w-6 h-6" />
+    <div className="min-h-screen bg-zinc-50 text-zinc-950">
+      <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-900 text-white">
+              <Bot className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold">AutoVT 回归测试工作台</h1>
+              <p className="text-xs text-zinc-500">教程生成案例，Playwright 自动执行，截图和日志留证据</p>
+            </div>
           </div>
-          <h1 className="text-xl font-bold tracking-tight">Coze 自动化测试平台</h1>
-        </div>
-        <div className="flex items-center gap-4">
-          <input
-            type="text"
-            value={targetUrl}
-            onChange={(e) => setTargetUrl(e.target.value)}
-            className="w-96 px-4 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-            placeholder="目标 URL"
-          />
-          <button
-            onClick={runTest}
-            disabled={isRunning}
-            className={`flex items-center gap-2 px-6 py-2 rounded-md font-medium transition-all ${
-              isRunning 
-                ? "bg-slate-200 text-slate-500 cursor-not-allowed" 
-                : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm hover:shadow-md"
-            }`}
-          >
-            <Play className={`w-4 h-4 ${isRunning ? "animate-pulse" : ""}`} />
-            {isRunning ? "运行中..." : "开始测试"}
-          </button>
+          <div className="flex items-center gap-2">
+            <span className={`rounded-md border px-3 py-1.5 text-xs ${health?.cozeAuthReady ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+              {health?.cozeAuthReady ? "Coze 登录态已就绪" : "Coze 登录态未配置"}
+            </span>
+            <button onClick={() => refresh()} className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm hover:bg-zinc-100">
+              <RefreshCw className="h-4 w-4" /> 刷新
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-6 grid grid-cols-12 gap-6">
-        {/* Task List */}
-        <div className="col-span-4 space-y-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-              <List className="w-4 h-4" />
-              最近任务
-            </h2>
-            <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full text-slate-600 font-medium">
-              {tasks.length}
-            </span>
+      <main className="mx-auto grid max-w-[1500px] grid-cols-12 gap-5 px-5 py-5">
+        <section className="col-span-12 space-y-5 lg:col-span-4">
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <Plus className="h-4 w-4 text-blue-600" />
+              <h2 className="font-semibold">生成测试案例</h2>
+            </div>
+            <label className="mb-2 block text-xs font-medium text-zinc-600">目标网址</label>
+            <input value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)} className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-blue-500" />
+            <label className="mb-2 block text-xs font-medium text-zinc-600">你希望测试什么</label>
+            <textarea value={objective} onChange={(event) => setObjective(event.target.value)} rows={3} className="mb-4 w-full resize-none rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-blue-500" />
+            <label className="mb-2 block text-xs font-medium text-zinc-600">教程或操作说明</label>
+            <textarea value={tutorial} onChange={(event) => setTutorial(event.target.value)} rows={6} className="mb-4 w-full resize-none rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-blue-500" />
+            <button onClick={generateCase} disabled={isGenerating} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300">
+              {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} 生成并保存案例
+            </button>
           </div>
-          <div className="space-y-3 overflow-y-auto max-h-[calc(100vh-180px)] pr-2">
-            {tasks.map((task) => (
-              <motion.div
-                layoutId={task.taskId}
-                key={task.taskId}
-                onClick={() => setSelectedTask(task)}
-                className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                  selectedTask?.taskId === task.taskId
-                    ? "bg-white border-indigo-500 shadow-md ring-1 ring-indigo-500"
-                    : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm"
-                }`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    {task.status === "success" ? (
-                      <CheckCircle className="w-5 h-5 text-emerald-500" />
-                    ) : task.status === "failure" ? (
-                      <XCircle className="w-5 h-5 text-rose-500" />
-                    ) : task.status === "AUTH_REQUIRED" || task.status === "AUTH_EXPIRED" ? (
-                      <AlertCircle className="w-5 h-5 text-amber-500" />
-                    ) : (
-                      <Clock className="w-5 h-5 text-amber-500 animate-spin" />
-                    )}
-                    <span className="font-mono text-xs text-slate-500">
-                      ID: {task.taskId.slice(0, 8)}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400">
-                    {new Date(task.startTime).toLocaleTimeString()}
-                  </span>
-                </div>
-                <div className="text-sm font-medium truncate mb-1">{task.targetUrl}</div>
-                <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {task.endTime 
-                      ? `${Math.round((new Date(task.endTime).getTime() - new Date(task.startTime).getTime()) / 1000)}秒`
-                      : "运行中..."}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <ImageIcon className="w-3 h-3" />
-                    {task.screenshots?.length || 0} 张截图
-                  </span>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
 
-        {/* Task Details */}
-        <div className="col-span-8">
-          <AnimatePresence mode="wait">
-            {selectedTask ? (
-              <motion.div
-                key={selectedTask.taskId}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[calc(100vh-180px)]"
-              >
-                {/* Task Header */}
-                <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <h2 className="text-2xl font-bold tracking-tight">任务详情报告</h2>
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest ${
-                        selectedTask.status === "success" ? "bg-emerald-100 text-emerald-700" : 
-                        selectedTask.status === "failure" ? "bg-rose-100 text-rose-700" : 
-                        selectedTask.status === "AUTH_REQUIRED" || selectedTask.status === "AUTH_EXPIRED" ? "bg-amber-100 text-amber-700" :
-                        "bg-amber-100 text-amber-700"
-                      }`}>
-                        {selectedTask.status === "success" ? "成功" : 
-                         selectedTask.status === "failure" ? "失败" : 
-                         selectedTask.status === "AUTH_REQUIRED" ? "需要登录" :
-                         selectedTask.status === "AUTH_EXPIRED" ? "登录过期" :
-                         "运行中"}
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-amber-600" />
+              <h2 className="font-semibold">登录态</h2>
+            </div>
+            <p className="mb-3 text-sm leading-6 text-zinc-600">Coze 有验证码和账号安全校验，云端不能凭空登录。先本地运行登录保存，或把 storageState JSON 粘贴到这里。</p>
+            <textarea value={authJson} onChange={(event) => setAuthJson(event.target.value)} placeholder="粘贴 playwright storageState JSON" rows={4} className="mb-3 w-full resize-none rounded-md border border-zinc-300 px-3 py-2 text-xs font-mono outline-none focus:border-amber-500" />
+            <button onClick={uploadAuth} disabled={!authJson.trim()} className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
+              <Save className="h-4 w-4" /> 保存登录态
+            </button>
+          </div>
+        </section>
+
+        <section className="col-span-12 space-y-5 lg:col-span-4">
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="h-4 w-4 text-emerald-600" />
+                <h2 className="font-semibold">案例库</h2>
+              </div>
+              <span className="rounded bg-zinc-100 px-2 py-1 text-xs text-zinc-600">{cases.length}</span>
+            </div>
+            <div className="space-y-3">
+              {cases.map((item) => (
+                <button key={item.id} onClick={() => setSelectedCaseId(item.id)} className={`w-full rounded-lg border p-3 text-left transition ${selectedCase?.id === item.id ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white hover:bg-zinc-50"}`}>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="font-medium">{item.name}</span>
+                    <span className="text-xs text-zinc-500">{item.steps.length} 步</span>
+                  </div>
+                  <p className="line-clamp-2 text-sm leading-5 text-zinc-600">{item.description}</p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {item.tags.map((tag) => <span key={tag} className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">{tag}</span>)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectedCase && (
+            <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold">{selectedCase.name}</h2>
+                  <p className="mt-1 text-sm leading-6 text-zinc-600">{selectedCase.description}</p>
+                </div>
+                <button onClick={() => runCase(selectedCase.id)} disabled={isRunning} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-zinc-300">
+                  {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} 运行
+                </button>
+              </div>
+              <div className="space-y-2">
+                {selectedCase.steps.map((step, index) => (
+                  <div key={step.id} className="flex gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-white text-xs font-medium text-zinc-500">{index + 1}</span>
+                    <div>
+                      <div className="text-sm font-medium">{step.name}</div>
+                      <div className="text-xs text-zinc-500">{step.type}{step.screenshot ? " · 截图" : ""}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="col-span-12 space-y-5 lg:col-span-4">
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <FileText className="h-4 w-4 text-purple-600" />
+              <h2 className="font-semibold">运行报告</h2>
+            </div>
+            <div className="mb-4 max-h-48 space-y-2 overflow-auto pr-1">
+              {tasks.map((task) => {
+                const meta = statusMeta(task.status);
+                const Icon = meta.icon;
+                return (
+                  <button key={task.taskId} onClick={() => setSelectedTaskId(task.taskId)} className={`w-full rounded-md border p-3 text-left ${selectedTask?.taskId === task.taskId ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white hover:bg-zinc-50"}`}>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">{task.caseName || task.taskId}</span>
+                      <span className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-xs ${meta.tone}`}>
+                        <Icon className={`h-3 w-3 ${task.status === "running" ? "animate-spin" : ""}`} /> {meta.label}
                       </span>
                     </div>
-                  </div>
+                    <div className="text-xs text-zinc-500">{compactTime(task.startTime)}</div>
+                  </button>
+                );
+              })}
+            </div>
 
-                  {(selectedTask.status === "AUTH_REQUIRED" || selectedTask.status === "AUTH_EXPIRED") && (
-                    <div className="mx-8 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5" />
-                      <div>
-                        <div className="font-bold text-amber-800">
-                          {selectedTask.status === "AUTH_REQUIRED" ? "未检测到登录态" : "登录态已过期"}
-                        </div>
-                        <div className="text-sm text-amber-700 mt-1">
-                          {selectedTask.message || "请在本地终端运行 npm run save-auth 进行人工登录并保存登录态。"}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-6 text-sm">
-                    <div>
-                      <div className="text-slate-400 mb-1">开始时间</div>
-                      <div className="font-medium">{new Date(selectedTask.startTime).toLocaleString()}</div>
-                    </div>
-                    <div>
-                      <div className="text-slate-400 mb-1">耗时</div>
-                      <div className="font-medium">
-                        {selectedTask.endTime 
-                          ? `${Math.round((new Date(selectedTask.endTime).getTime() - new Date(selectedTask.startTime).getTime()) / 1000)} 秒`
-                          : "进行中"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-slate-400 mb-1">目标地址</div>
-                      <div className="font-medium truncate max-w-[200px]">{selectedTask.targetUrl}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-8 space-y-8">
-                  {/* AI Summary */}
-                  {selectedTask.aiSummary && (
-                    <section>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-indigo-500" />
-                        AI 智能分析结论
-                      </h3>
-                      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6 text-indigo-900 leading-relaxed whitespace-pre-wrap text-sm italic">
-                        {selectedTask.aiSummary}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Steps Timeline */}
-                  <section>
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">执行时间轴</h3>
-                    <div className="space-y-4">
-                      {selectedTask.steps?.map((step, idx) => (
-                        <div key={idx} className="flex items-start gap-4">
-                          <div className="mt-1">
-                            {step.status === "pass" ? (
-                              <CheckCircle className="w-5 h-5 text-emerald-500" />
-                            ) : (
-                              <XCircle className="w-5 h-5 text-rose-500" />
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-semibold text-slate-800">{step.name}</span>
-                              <span className="text-xs text-slate-400">{step.duration}ms</span>
-                            </div>
-                            {step.error && (
-                              <div className="text-xs text-rose-600 bg-rose-50 p-2 rounded border border-rose-100 mt-1 font-mono">
-                                <div className="font-bold mb-1">错误详情：</div>
-                                {step.error}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-
-                  {/* Screenshots */}
-                  {selectedTask.screenshots?.length > 0 && (
-                    <section>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">执行截图 (点击放大)</h3>
-                      <div className="grid grid-cols-2 gap-4">
-                        {selectedTask.screenshots.map((src, idx) => (
-                          <div 
-                            key={idx} 
-                            onClick={() => setZoomImage(`/storage/${selectedTask.taskId}/${src}`)}
-                            className="group relative rounded-xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-zoom-in"
-                          >
-                            <img 
-                              src={`/storage/${selectedTask.taskId}/${src}`} 
-                              alt={`Screenshot ${idx}`}
-                              className="w-full h-48 object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                              <span className="text-white text-xs font-bold uppercase tracking-widest bg-black/60 px-3 py-1 rounded-full">
-                                查看大图
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Logs & Errors */}
-                  {(selectedTask.consoleErrors?.length > 0 || selectedTask.networkFailures?.length > 0) && (
-                    <section className="grid grid-cols-2 gap-6">
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 text-rose-500" />
-                          控制台错误日志 (Console)
-                        </h3>
-                        <div className="text-[10px] text-slate-500 mb-2">说明：网页代码执行过程中的内部报错，通常不影响主流程。</div>
-                        <div className="bg-slate-900 rounded-xl p-4 max-h-48 overflow-y-auto font-mono text-[10px] text-rose-400 space-y-1">
-                          {selectedTask.consoleErrors.map((err, i) => (
-                            <div key={i} className="border-b border-slate-800 pb-1 last:border-0">{err}</div>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 text-amber-500" />
-                          网络请求失败 (Network)
-                        </h3>
-                        <div className="text-[10px] text-slate-500 mb-2">说明：网页尝试加载资源（图片、脚本）但失败了，可能是网络波动。</div>
-                        <div className="bg-slate-900 rounded-xl p-4 max-h-48 overflow-y-auto font-mono text-[10px] text-amber-400 space-y-1">
-                          {selectedTask.networkFailures.map((err, i) => (
-                            <div key={i} className="border-b border-slate-800 pb-1 last:border-0">{err}</div>
-                          ))}
-                        </div>
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Final Output */}
-                  {selectedTask.finalOutput && (
-                    <section>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">最终执行输出</h3>
-                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 font-medium text-slate-700">
-                        {selectedTask.finalOutput}
-                      </div>
-                    </section>
-                  )}
-                </div>
-              </motion.div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-[calc(100vh-180px)] text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl">
-                <div className="bg-slate-100 p-4 rounded-full mb-4">
-                  <ChevronRight className="w-8 h-8" />
-                </div>
-                <p className="text-lg font-medium">请选择一个任务查看详细报告</p>
-                <p className="text-sm">或者点击上方按钮开始新的测试</p>
-              </div>
-            )}
-          </AnimatePresence>
-        </div>
+            {selectedTask ? <Report task={selectedTask} onZoom={setZoomImage} /> : <EmptyReport />}
+          </div>
+        </section>
       </main>
 
-      {/* Image Zoom Modal */}
-      <AnimatePresence>
-        {zoomImage && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setZoomImage(null)}
-            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
-          >
-            <motion.img 
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.9 }}
-              src={zoomImage} 
-              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-              referrerPolicy="no-referrer"
-            />
-            <button className="absolute top-6 right-6 text-white/70 hover:text-white bg-white/10 p-2 rounded-full backdrop-blur-md">
-              <XCircle className="w-8 h-8" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {zoomImage && (
+        <div onClick={() => setZoomImage(null)} className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-black/85 p-6">
+          <img src={zoomImage} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyReport() {
+  return (
+    <div className="flex h-64 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-300 text-zinc-500">
+      <Clock3 className="mb-2 h-8 w-8" />
+      <p className="text-sm">还没有运行记录</p>
+    </div>
+  );
+}
+
+function Report({ task, onZoom }: { task: TestResult; onZoom: (src: string) => void }) {
+  const meta = statusMeta(task.status);
+  const Icon = meta.icon;
+  const duration = task.endTime ? Math.round((new Date(task.endTime).getTime() - new Date(task.startTime).getTime()) / 1000) : undefined;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+      <div className={`rounded-lg border p-3 ${meta.tone}`}>
+        <div className="mb-1 flex items-center gap-2 font-medium">
+          <Icon className={`h-4 w-4 ${task.status === "running" ? "animate-spin" : ""}`} /> {meta.label}
+        </div>
+        <div className="text-sm leading-6">{task.message || task.aiSummary || "测试正在执行或已完成。"}</div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <Info label="步骤" value={`${task.steps.length}`} />
+        <Info label="截图" value={`${task.screenshots.length}`} />
+        <Info label="耗时" value={duration ? `${duration}s` : "运行中"} />
+      </div>
+
+      {task.aiSummary && (
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+          <div className="mb-2 text-xs font-semibold text-zinc-500">AI 总结</div>
+          <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-700">{task.aiSummary}</p>
+        </div>
+      )}
+
+      <div>
+        <div className="mb-2 text-xs font-semibold text-zinc-500">步骤结果</div>
+        <div className="space-y-2">
+          {task.steps.map((step) => (
+            <div key={step.id} className="rounded-md border border-zinc-200 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {step.status === "pass" ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <XCircle className="h-4 w-4 text-rose-600" />}
+                  <span className="text-sm font-medium">{step.name}</span>
+                </div>
+                <span className="text-xs text-zinc-500">{step.duration}ms</span>
+              </div>
+              {step.error && <p className="mt-2 rounded bg-rose-50 p-2 text-xs leading-5 text-rose-700">{step.error}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {task.screenshots.length > 0 && (
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-500"><ImageIcon className="h-3 w-3" />截图证据</div>
+          <div className="grid grid-cols-2 gap-2">
+            {task.screenshots.slice(-6).map((shot) => {
+              const src = `/storage/${task.taskId}/${shot}`;
+              return <button key={shot} onClick={() => onZoom(src)} className="overflow-hidden rounded-md border border-zinc-200 bg-zinc-100"><img src={src} className="h-28 w-full object-cover" /></button>;
+            })}
+          </div>
+        </div>
+      )}
+
+      {(task.consoleErrors.length > 0 || task.networkFailures.length > 0) && (
+        <div className="rounded-lg border border-zinc-200 bg-zinc-950 p-3 text-xs text-zinc-200">
+          <div className="mb-2 flex items-center gap-2 font-semibold text-amber-300"><AlertCircle className="h-3 w-3" />错误记录</div>
+          {[...task.consoleErrors.slice(0, 4), ...task.networkFailures.slice(0, 4)].map((item, index) => <div key={index} className="border-b border-zinc-800 py-1 last:border-0">{item}</div>)}
+        </div>
+      )}
+
+      {task.traceFile && <a className="inline-flex text-sm font-medium text-blue-700 hover:underline" href={`/storage/${task.taskId}/${task.traceFile}`}>下载 Playwright trace</a>}
+    </motion.div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-2">
+      <div className="text-zinc-500">{label}</div>
+      <div className="mt-1 font-semibold text-zinc-900">{value}</div>
     </div>
   );
 }

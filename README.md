@@ -1,20 +1,41 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+﻿# AutoVT
 
-# Run and deploy your AI Studio app
+AutoVT is a lightweight AI-assisted visual regression and workflow smoke-test console for low-code / agent-building web apps.
 
-This contains everything you need to run your app locally.
+Current MVP:
 
-View your app in AI Studio: https://ai.studio/apps/5bec6dd0-dad3-4218-9496-e0d9ba72683f
+- Generate a reusable test case from a target URL, objective, and tutorial text.
+- Keep reusable cases in a local JSON case library.
+- Run cases with Playwright in the background.
+- Collect step status, screenshots, console errors, network failures, and Playwright trace files.
+- Ship with a Coze workflow smoke-test template: create a workflow, add an LLM node, run it, and verify output.
+- Use an optional OpenAI-compatible model endpoint for Chinese QA summaries.
 
-## Run Locally
+## Local Run
 
-**Prerequisites:**  Node.js
+```bash
+npm install
+npm run dev
+```
 
+Open `http://localhost:3000`.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Coze Login State
+
+Coze normally requires manual login and may show verification challenges. Save a Playwright storage state before running the Coze template:
+
+```bash
+npm run save-auth
+```
+
+This writes `playwright/.auth/coze-user.json`. The web UI also supports pasting a storageState JSON.
+
+## Environment Variables
+
+```bash
+AI_API_KEY=...
+AI_BASE_URL=https://your-openai-compatible-endpoint/v1
+AI_MODEL=qwen2.5-vl-72b-instruct
+```
+
+The AI variables are optional. Without them, AutoVT still runs tests and returns a rule-based summary.

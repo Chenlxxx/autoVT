@@ -1,61 +1,56 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { TestResult } from "../automation/types.ts";
+﻿import type { TestResult } from "../automation/types.ts";
 
-// 配置自定义 AI 模型 (Anthropic 格式)
-const anthropic = new Anthropic({
-  apiKey: "sk-cp-20a37b5d8804b455f033d4936ab84625c3289d62e71ecf8f9e4498549f5d5b3b",
-  baseURL: "https://api.nengpa.com/anthropic", // Anthropic SDK 会自动补全 /v1
-});
+function buildFallbackSummary(result: TestResult) {
+  const failed = result.steps.find((step) => step.status === "fail");
+  if (result.status === "success") {
+    return `本次回归通过。共执行 ${result.steps.length} 个步骤，页面核心链路完成，已保存截图和 trace 证据。`;
+  }
+  if (result.status === "auth_required" || result.status === "auth_expired") {
+    return `本次回归未执行完成：${result.message || "登录态不可用"}。请先更新登录态后重新运行。`;
+  }
+  return `本次回归失败。失败步骤：${failed?.name || "未知"}。${failed?.error || result.message || "请查看失败截图、控制台错误和网络失败记录。"}`;
+}
 
-export async function analyzeResult(result: TestResult, taskDir: string): Promise<string> {
+export async function analyzeResult(result: TestResult): Promise<string> {
+  const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+  const baseURL = process.env.AI_BASE_URL;
+  const model = process.env.AI_MODEL || "qwen2.5-vl-72b-instruct";
+
+  if (!apiKey || !baseURL) return buildFallbackSummary(result);
+
   try {
-    const prompt = `
-      你是一名资深 QA 自动化工程师。请分析以下在 Coze.cn 上执行的 Web 自动化测试结果。
-      
-      任务 ID: ${result.taskId}
-      目标 URL: ${result.targetUrl}
-      最终状态: ${result.status}
-      
-      执行步骤:
-      ${result.steps.map(s => `- ${s.name}: ${s.status} (${s.duration}ms)${s.error ? ` 错误: ${s.error}` : ""}`).join("\n")}
-      
-      控制台错误 (Console Errors):
-      ${result.consoleErrors.slice(0, 5).join("\n")}
-      
-      网络失败记录 (Network Failures):
-      ${result.networkFailures.slice(0, 5).join("\n")}
-      
-      最终输出内容 (Final Output):
-      ${result.finalOutput || "无输出"}
-      
-      请提供：
-      1. 执行过程的简要总结。
-      2. 如果测试失败，请分析最可能的根本原因。
-      3. 核心流程（创建 -> 运行）是否成功的结论。
-      4. 提高自动化稳定性的改进建议。
-      
-      请使用中文输出，保持专业且简洁。
-    `;
+    const steps = result.steps
+      .map((step) => `- ${step.name}: ${step.status} (${step.duration}ms)${step.error ? `，错误：${step.error}` : ""}`)
+      .join("\n");
 
-    const response = await anthropic.messages.create({
-      model: "MiniMax-M2.5",
-      max_tokens: 4096,
-      system: "你是一个专业的自动化测试分析助手。请直接输出分析结果，不要包含思考过程（thinking）。",
-      messages: [
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.7,
+    const endpoint = `${baseURL.replace(/\/$/, "")}/chat/completions`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          {
+            role: "system",
+            content: "你是资深 QA 自动化测试分析助手。请用中文输出简洁、可执行的测试结论，不要输出思考过程。",
+          },
+          {
+            role: "user",
+            content: `请分析这次 Web 自动化回归测试。\n\n案例：${result.caseName}\n目标地址：${result.targetUrl}\n状态：${result.status}\n消息：${result.message || "无"}\n\n步骤：\n${steps}\n\nConsole 错误前 8 条：\n${result.consoleErrors.slice(0, 8).join("\n") || "无"}\n\n网络失败前 8 条：\n${result.networkFailures.slice(0, 8).join("\n") || "无"}\n\n请输出：1）最终结论；2）失败原因或风险；3）下一步建议。`,
+          },
+        ],
+      }),
     });
 
-    // 提取文本内容
-    const content = response.content[0];
-    if (content.type === 'text') {
-      return content.text;
-    }
-    
-    return "AI 未能生成有效的文本总结。";
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const data = await response.json() as any;
+    return data.choices?.[0]?.message?.content || buildFallbackSummary(result);
   } catch (error: any) {
-    console.error("AI 分析失败:", error);
-    return `AI 分析失败: ${error.message}`;
+    return `${buildFallbackSummary(result)}\n\nAI 分析调用失败：${error.message}`;
   }
 }
+

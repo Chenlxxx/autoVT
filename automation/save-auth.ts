@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+﻿import { chromium } from "playwright";
 import fs from "fs-extra";
 import path from "path";
 
@@ -8,33 +8,30 @@ async function saveAuth() {
 
   await fs.ensureDir(authDir);
 
-  console.log("正在启动浏览器进行人工登录...");
-  // 使用 non-headless 模式以便人工操作
+  console.log("正在打开浏览器，请在窗口中完成 Coze 登录。");
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  await page.goto("https://www.coze.cn/");
+  await page.goto("https://www.coze.cn/", { waitUntil: "domcontentloaded" });
 
-  console.log("请在浏览器窗口中完成登录（包括验证码）。");
-  console.log("登录成功并进入主页后，脚本将自动保存状态并关闭。");
+  console.log("登录完成并进入 Coze 页面后，脚本会自动保存登录态。最长等待 5 分钟。");
 
-  // 等待登录成功的标志：URL 不再包含 passport 且 出现了个人空间或项目等关键词
   try {
     await page.waitForFunction(
       () => {
         const url = window.location.href;
-        return !url.includes("passport") && !url.includes("auth/login") && 
-               (document.body.innerText.includes("项目") || document.body.innerText.includes("个人空间"));
+        const text = document.body.innerText;
+        const notLoginPage = !/passport|auth\/login|login/i.test(url);
+        return notLoginPage && (/资源|项目|空间|工作流|个人空间/.test(text) || /coze\.cn/.test(url));
       },
-      { timeout: 300000 } // 给 5 分钟时间进行人工操作
+      { timeout: 300000 }
     );
 
-    console.log("检测到登录成功，正在保存登录态...");
     await context.storageState({ path: authFile });
-    console.log(`登录态已保存至: ${authFile}`);
+    console.log(`登录态已保存：${authFile}`);
   } catch (error) {
-    console.error("等待登录超时或发生错误:", error);
+    console.error("等待登录超时，未保存登录态。", error);
   } finally {
     await browser.close();
   }

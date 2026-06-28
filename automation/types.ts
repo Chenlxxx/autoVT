@@ -1,43 +1,82 @@
-export type StepType = 
+﻿export type LoginMode = "none" | "storageState";
+
+export type StepType =
   | "goto"
-  | "waitForLogin"
+  | "checkAuth"
   | "click"
   | "input"
-  | "assertText"
+  | "drag"
+  | "waitForText"
   | "waitForUrl"
+  | "waitForIdle"
   | "screenshot"
-  | "extractText";
+  | "extractText"
+  | "assertVisible"
+  | "cozeCreateWorkflow"
+  | "cozeAddAndRunLLM";
 
-export interface StepConfig {
-  name: string;
-  type: StepType;
+export interface LocatorHint {
+  testId?: string;
+  role?: "button" | "link" | "textbox" | "menuitem" | "tab";
+  name?: string;
+  text?: string;
+  placeholder?: string;
   selectors?: string[];
-  value?: string; // 用于 input 的值或 assertText 的预期文本
-  url?: string;   // 用于 goto 或 waitForUrl
-  timeout?: number;
-  continueOnError?: boolean;
 }
 
-export interface FlowConfig {
+export interface StepConfig {
+  id: string;
   name: string;
+  type: StepType;
   description?: string;
-  baseUrl?: string;
+  target?: LocatorHint;
+  source?: LocatorHint;
+  destination?: LocatorHint;
+  value?: string;
+  url?: string;
+  timeout?: number;
+  continueOnError?: boolean;
+  screenshot?: boolean;
+}
+
+export interface TestCase {
+  id: string;
+  name: string;
+  description: string;
+  targetUrl: string;
+  loginMode: LoginMode;
+  authStatePath?: string;
+  tags: string[];
+  tutorial?: string;
+  objective?: string;
   steps: StepConfig[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StepEvidence {
+  screenshot?: string;
+  extractedText?: string;
 }
 
 export interface TestStepResult {
+  id: string;
   name: string;
-  status: "pass" | "fail";
+  type: StepType;
+  status: "pass" | "fail" | "skipped";
   duration: number;
   error?: string;
+  evidence?: StepEvidence;
 }
 
 export interface TestResult {
   taskId: string;
+  caseId: string;
+  caseName: string;
   startTime: string;
   endTime?: string;
   targetUrl: string;
-  status: "success" | "failure" | "running" | "AUTH_REQUIRED" | "AUTH_EXPIRED";
+  status: "success" | "failure" | "running" | "auth_required" | "auth_expired";
   message?: string;
   steps: TestStepResult[];
   screenshots: string[];
@@ -45,4 +84,12 @@ export interface TestResult {
   networkFailures: string[];
   finalOutput?: string;
   aiSummary?: string;
+  traceFile?: string;
+}
+
+export interface GeneratedCaseRequest {
+  targetUrl: string;
+  objective: string;
+  tutorial?: string;
+  loginMode?: LoginMode;
 }

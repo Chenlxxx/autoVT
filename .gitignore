@@ -8,3 +8,6 @@ coverage/
 !.env.example
 storage/
 playwright/.auth/
+data/
+.npm-cache*/
+node_modules.broken*/
