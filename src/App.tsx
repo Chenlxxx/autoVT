@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Bot,
@@ -55,6 +55,7 @@ interface TestStepResult {
   evidence?: {
     screenshot?: string;
     extractedText?: string;
+    visualAnalysis?: string;
     diagnostics?: string[];
     recoveryActions?: string[];
     pageState?: Record<string, unknown>;
@@ -88,6 +89,13 @@ interface HealthState {
   status: string;
   cozeAuthReady: boolean;
   interactiveAuthSupported: boolean;
+  vision?: {
+    enabled: boolean;
+    provider: "openai-compatible" | "heuristic";
+    model: string;
+    configured: boolean;
+    fallback: string;
+  };
 }
 
 interface AuthSession {
@@ -266,6 +274,9 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <span className={`rounded-md border px-3 py-1.5 text-xs ${health?.vision?.configured ? "border-blue-200 bg-blue-50 text-blue-700" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
+              {health?.vision?.configured ? `视觉模型：${health.vision.model}` : "视觉诊断：规则兜底"}
+            </span>
             <span className={`rounded-md border px-3 py-1.5 text-xs ${health?.cozeAuthReady ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
               {health?.cozeAuthReady ? "Coze 登录态已就绪" : "Coze 登录态未配置"}
             </span>
@@ -456,6 +467,12 @@ function Report({ task, onZoom }: { task: TestResult; onZoom: (src: string) => v
                 <span className="text-xs text-zinc-500">{step.duration}ms</span>
               </div>
               {step.error && <p className="mt-2 rounded bg-rose-50 p-2 text-xs leading-5 text-rose-700">{step.error}</p>}
+              {step.evidence?.visualAnalysis && (
+                <div className="mt-2 rounded bg-indigo-50 p-2 text-xs leading-5 text-indigo-900">
+                  <div className="mb-1 font-semibold">视觉诊断</div>
+                  <p className="whitespace-pre-wrap">{step.evidence.visualAnalysis}</p>
+                </div>
+              )}
               {step.evidence?.recoveryActions && step.evidence.recoveryActions.length > 0 && (
                 <div className="mt-2 rounded bg-blue-50 p-2 text-xs leading-5 text-blue-800">
                   <div className="mb-1 font-semibold">已尝试自修复</div>

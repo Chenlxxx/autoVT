@@ -1,8 +1,9 @@
-﻿import { chromium } from "playwright";
+import { chromium } from "playwright";
 import type { Locator, Page } from "playwright";
 import fs from "fs-extra";
 import path from "path";
 import type { LocatorHint, StepConfig, TestCase, TestResult, TestStepResult } from "./types.ts";
+import { analyzeScreenshot } from "./vision.ts";
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 920 };
 
@@ -774,6 +775,19 @@ export async function runTestCase(
           stepResult.evidence.screenshot = await takeScreenshot(`失败-${currentStep.name}`);
         } catch {
           // Ignore screenshot failures so the real step error is preserved.
+        }
+        if (stepResult.evidence.screenshot) {
+          try {
+            stepResult.evidence.visualAnalysis = await analyzeScreenshot(path.join(taskDir, stepResult.evidence.screenshot), {
+              stepName: currentStep.name,
+              error: stepResult.error,
+              diagnostics: stepResult.evidence.diagnostics,
+              recoveryActions: stepResult.evidence.recoveryActions,
+              pageState: stepResult.evidence.pageState,
+            });
+          } catch (visionError: any) {
+            stepResult.evidence.visualAnalysis = `视觉诊断失败：${visionError?.message || String(visionError)}`;
+          }
         }
 
         if (result.status === "auth_expired") throw error;

@@ -57,6 +57,7 @@ export interface TestCase {
 export interface StepEvidence {
   screenshot?: string;
   extractedText?: string;
+  visualAnalysis?: string;
   diagnostics?: string[];
   recoveryActions?: string[];
   pageState?: Record<string, unknown>;

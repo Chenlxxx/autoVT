@@ -1,4 +1,4 @@
-﻿import { createReadStream } from "fs";
+import { createReadStream } from "fs";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { createCozeWorkflowCase, generateHeuristicCase } from "./automation/case-generator.ts";
 import type { GeneratedCaseRequest, TestCase } from "./automation/types.ts";
+import { getVisionConfig } from "./automation/vision.ts";
 import { analyzeResult } from "./server/gemini.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -189,7 +190,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       env: process.env.NODE_ENV || "development",
       cozeAuthReady: await pathExists(path.join(authDir, "coze-user.json")),
       interactiveAuthSupported: interactiveAuthSupported(),
+      vision: getVisionConfig(),
     });
+  }
+
+  if (method === "GET" && pathname === "/api/vision/config") {
+    return sendJson(res, 200, getVisionConfig());
   }
 
   if (method === "GET" && pathname === "/api/cases") return sendJson(res, 200, await listCases());
