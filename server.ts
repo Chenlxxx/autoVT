@@ -349,7 +349,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
+async function listenWithPortFallback(startPort: number, maxAttempts = 10) {
+  for (let offset = 0; offset < maxAttempts; offset += 1) {
+    const port = startPort + offset;
+    const server = createServer(handleRequest);
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "0.0.0.0", () => {
+          server.off("error", reject);
+          resolve();
+        });
+      });
+
+      const fallbackNote = port === startPort ? "" : `，默认端口 ${startPort} 被占用，已自动切换`;
+      console.log(`AutoVT server running on http://localhost:${port}${fallbackNote}`);
+      return;
+    } catch (error: any) {
+      server.close();
+      if (error?.code !== "EADDRINUSE") throw error;
+      console.warn(`Port ${port} is already in use, trying ${port + 1}...`);
+    }
+  }
+
+  throw new Error(`Unable to find an available port from ${startPort} to ${startPort + maxAttempts - 1}`);
+}
+
 await ensureSeedData();
-createServer(handleRequest).listen(PORT, "0.0.0.0", () => {
-  console.log(`AutoVT server running on http://localhost:${PORT}`);
-});
+await listenWithPortFallback(PORT);

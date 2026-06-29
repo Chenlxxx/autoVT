@@ -65,7 +65,12 @@ declare module "crypto" {
 }
 
 declare module "http" {
-  export function createServer(handler: any): { listen(port: number, host: string, cb?: () => void): void };
+  export function createServer(handler: any): {
+    listen(port: number, host: string, cb?: () => void): void;
+    once(event: string, cb: any): void;
+    off(event: string, cb: any): void;
+    close(): void;
+  };
   export type IncomingMessage = any;
   export type ServerResponse = any;
 }
