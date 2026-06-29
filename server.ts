@@ -99,7 +99,7 @@ async function ensureSeedData() {
   await fs.mkdir(authDir, { recursive: true });
 
   const seed = createCozeWorkflowCase();
-  if (!(await pathExists(path.join(casesDir, `${seed.id}.json`)))) await writeCase(seed);
+  await writeCase(seed);
 }
 
 async function listTasks() {

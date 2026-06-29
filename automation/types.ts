@@ -57,6 +57,14 @@ export interface TestCase {
 export interface StepEvidence {
   screenshot?: string;
   extractedText?: string;
+  diagnostics?: string[];
+  recoveryActions?: string[];
+  pageState?: Record<string, unknown>;
+  needsHumanInput?: {
+    reason: string;
+    question: string;
+    suggestions: string[];
+  };
 }
 
 export interface TestStepResult {
@@ -85,6 +93,7 @@ export interface TestResult {
   finalOutput?: string;
   aiSummary?: string;
   traceFile?: string;
+  diagnostics?: string[];
 }
 
 export interface GeneratedCaseRequest {

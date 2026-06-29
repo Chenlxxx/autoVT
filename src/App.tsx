@@ -52,7 +52,18 @@ interface TestStepResult {
   status: StepStatus;
   duration: number;
   error?: string;
-  evidence?: { screenshot?: string; extractedText?: string };
+  evidence?: {
+    screenshot?: string;
+    extractedText?: string;
+    diagnostics?: string[];
+    recoveryActions?: string[];
+    pageState?: Record<string, unknown>;
+    needsHumanInput?: {
+      reason: string;
+      question: string;
+      suggestions: string[];
+    };
+  };
 }
 
 interface TestResult {
@@ -70,6 +81,7 @@ interface TestResult {
   networkFailures: string[];
   aiSummary?: string;
   traceFile?: string;
+  diagnostics?: string[];
 }
 
 interface HealthState {
@@ -444,6 +456,32 @@ function Report({ task, onZoom }: { task: TestResult; onZoom: (src: string) => v
                 <span className="text-xs text-zinc-500">{step.duration}ms</span>
               </div>
               {step.error && <p className="mt-2 rounded bg-rose-50 p-2 text-xs leading-5 text-rose-700">{step.error}</p>}
+              {step.evidence?.recoveryActions && step.evidence.recoveryActions.length > 0 && (
+                <div className="mt-2 rounded bg-blue-50 p-2 text-xs leading-5 text-blue-800">
+                  <div className="mb-1 font-semibold">已尝试自修复</div>
+                  {step.evidence.recoveryActions.map((action, index) => <div key={index}>- {action}</div>)}
+                </div>
+              )}
+              {step.evidence?.diagnostics && step.evidence.diagnostics.length > 0 && (
+                <div className="mt-2 rounded bg-zinc-50 p-2 text-xs leading-5 text-zinc-700">
+                  <div className="mb-1 font-semibold">诊断</div>
+                  {step.evidence.diagnostics.map((item, index) => <div key={index}>- {item}</div>)}
+                </div>
+              )}
+              {step.evidence?.needsHumanInput && (
+                <div className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs leading-5 text-amber-900">
+                  <div className="mb-1 font-semibold">需要确认</div>
+                  <div>{step.evidence.needsHumanInput.reason}</div>
+                  <div className="mt-1">{step.evidence.needsHumanInput.question}</div>
+                  {step.evidence.needsHumanInput.suggestions.map((item, index) => <div key={index}>- {item}</div>)}
+                </div>
+              )}
+              {step.evidence?.pageState && (
+                <details className="mt-2 rounded bg-zinc-950 p-2 text-xs text-zinc-200">
+                  <summary className="cursor-pointer font-semibold">页面状态快照</summary>
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{JSON.stringify(step.evidence.pageState, null, 2)}</pre>
+                </details>
+              )}
             </div>
           ))}
         </div>

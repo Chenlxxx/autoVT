@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+﻿import { randomUUID } from "crypto";
 import type { GeneratedCaseRequest, StepConfig, TestCase } from "./types.ts";
 
 const COZE_WORKFLOW_TUTORIAL_HINT = `Coze workflow regression: open the resource or library page, create a workflow, add an LLM node, run the workflow, and verify that a result is visible.`;
@@ -49,7 +49,7 @@ export function createCozeWorkflowCase(targetUrl?: string): TestCase {
         name: "添加大模型节点并试运行",
         type: "cozeAddAndRunLLM",
         value: "请只回复：hello AutoVT",
-        timeout: 120000,
+        timeout: 60000,
         screenshot: true,
       }),
       step({
